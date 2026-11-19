@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import Combinada from "./Combinada";
 
 function FormBadge({ result }) {
   const colors = { W: "#00e676", D: "#ffeb3b", L: "#f44336" };
@@ -67,14 +68,15 @@ export default function Home() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [animated, setAnimated] = useState(false);
+  const [tab, setTab] = useState("combinada");
 
   useEffect(() => {
     if (data) setTimeout(() => setAnimated(true), 100);
     else setAnimated(false);
   }, [data]);
 
-  async function analyze() {
-    if (!home.trim() || !away.trim()) return;
+  async function analyze(h = home, a = away, league) {
+    if (!h.trim() || !a.trim()) return;
     setLoading(true);
     setError("");
     setData(null);
@@ -83,7 +85,7 @@ export default function Home() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ home: home.trim(), away: away.trim() })
+        body: JSON.stringify({ home: h.trim(), away: a.trim(), league })
       });
 
       if (!res.ok) throw new Error(await res.text());
@@ -130,6 +132,21 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 20 }}>
+        {[["combinada", "🧮 Combinada del día"], ["analizar", "⚡ Analizar partido"]].map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)} style={{
+            background: tab === k ? "#1d4ed8" : "#0f172a", border: "1px solid #1e3a5f", color: "#e2e8f0",
+            borderRadius: 999, padding: "8px 16px", fontSize: 13, cursor: "pointer", fontFamily: "monospace"
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {tab === "combinada" && (
+        <Combinada onAnalyze={(h, a, league) => { setHome(h); setAway(a); setTab("analizar"); analyze(h, a, league); window.scrollTo(0, 0); }} />
+      )}
+
+      {tab === "analizar" && (<>
       {/* Input */}
       <div style={{ maxWidth: 700, margin: "0 auto", padding: "32px 20px 0" }}>
         <div style={{ background: "#0f172a", border: "1px solid #1e3a5f", borderRadius: 16, padding: 24 }}>
@@ -156,7 +173,7 @@ export default function Home() {
               }}
             />
           </div>
-          <button onClick={analyze} disabled={loading || !home.trim() || !away.trim()} style={{
+          <button onClick={() => analyze()} disabled={loading || !home.trim() || !away.trim()} style={{
             marginTop: 16, width: "100%", padding: "14px",
             background: loading ? "#1e293b" : "linear-gradient(135deg, #1d4ed8, #3b82f6)",
             border: "none", borderRadius: 10, color: "#fff", fontSize: 14, fontWeight: 700,
@@ -239,6 +256,23 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Ranked options (modelo con resultados reales) */}
+          {data.options?.length > 0 && (
+            <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 16, padding: 20, marginBottom: 20 }}>
+              <div style={{ fontSize: 11, color: "#64748b", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6, fontFamily: "monospace" }}>📋 Opciones de la más a la menos probable</div>
+              <div style={{ fontSize: 12, color: "#475569", marginBottom: 12 }}>
+                Cuota justa = lo mínimo que debería pagar la casa. Si paga más, la apuesta tiene valor.
+              </div>
+              {data.options.filter(o => o.prob < 97).slice(0, 12).map((o, i) => (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 12, alignItems: "center", padding: "7px 0", borderBottom: "1px solid #1e293b" }}>
+                  <div style={{ fontSize: 13, color: "#e2e8f0" }}>{o.label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, fontFamily: "monospace", color: o.prob >= 70 ? "#00e676" : o.prob >= 55 ? "#ffeb3b" : "#94a3b8" }}>{o.prob}%</div>
+                  <div style={{ fontSize: 12, color: "#64748b", fontFamily: "monospace", minWidth: 70, textAlign: "right" }}>@ {o.fairOdd}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Probabilities */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 20 }}>
             <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 16, padding: 20 }}>
@@ -256,6 +290,7 @@ export default function Home() {
               <ProbBar label="Ambos marcan" value={data.probabilities.btts} color="#06b6d4" />
             </div>
 
+            {data.probabilities.corners && data.probabilities.cards && (
             <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 16, padding: 20 }}>
               <div style={{ fontSize: 11, color: "#64748b", letterSpacing: 2, textTransform: "uppercase", marginBottom: 16, fontFamily: "monospace" }}>🚩 Córners & 🟨 Tarjetas</div>
               <ProbBar label="+8.5 córners" value={data.probabilities.corners.over85} color="#a855f7" />
@@ -265,6 +300,7 @@ export default function Home() {
                 <ProbBar label="+3.5 tarjetas" value={data.probabilities.cards.over35} color="#d97706" />
               </div>
             </div>
+            )}
 
             <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 16, padding: 20 }}>
               <div style={{ fontSize: 11, color: "#64748b", letterSpacing: 2, textTransform: "uppercase", marginBottom: 16, fontFamily: "monospace" }}>🎯 Marcadores Exactos</div>
@@ -295,8 +331,10 @@ export default function Home() {
                     { label: "Córners/ptdo", val: team.avgCorners, icon: "🚩" },
                     { label: "Tarjetas am.", val: team.avgYellowCards, icon: "🟨" },
                     { label: "Tarjetas ro.", val: team.avgRedCards, icon: "🟥" },
-                    { label: "Posesión", val: `${team.possession}%`, icon: "📊" },
-                  ].map(({ label, val, icon }) => (
+                    { label: "Posesión", val: team.possession != null ? `${team.possession}%` : null, icon: "📊" },
+                    { label: "En casa (GF-GC)", val: team.home?.n ? `${team.home.gf}-${team.home.ga}` : null, icon: "🏠" },
+                    { label: "Fuera (GF-GC)", val: team.away?.n ? `${team.away.gf}-${team.away.ga}` : null, icon: "✈️" },
+                  ].filter(x => x.val != null).map(({ label, val, icon }) => (
                     <div key={label} style={{ background: "#020817", borderRadius: 8, padding: "10px 12px" }}>
                       <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>{icon} {label}</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: "#f1f5f9", fontFamily: "monospace" }}>{val}</div>
@@ -318,20 +356,32 @@ export default function Home() {
                   </div>
                 )}
 
-                <div style={{ marginBottom: 10 }}>
+                {team.lastResults?.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, fontFamily: "monospace" }}>🗓️ ÚLTIMOS PARTIDOS</div>
+                    {team.lastResults.map((r, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8", padding: "3px 0" }}>
+                        <span>{r.date.slice(5)} · {r.where === "casa" ? "vs" : "en"} {r.rival}</span>
+                        <span style={{ fontFamily: "monospace", color: r.r === "W" ? "#00e676" : r.r === "D" ? "#ffeb3b" : "#f44336" }}>{r.score}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {team.keyPlayers?.length > 0 && <div style={{ marginBottom: 10 }}>
                   <div style={{ fontSize: 11, color: "#34d399", marginBottom: 6, fontFamily: "monospace" }}>⭐ JUGADORES CLAVE</div>
                   {team.keyPlayers?.map((p, i) => <div key={i} style={{ fontSize: 12, color: "#6ee7b7", padding: "3px 0" }}>• {p}</div>)}
-                </div>
+                </div>}
 
-                <div style={{ background: "#020817", borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                {team.nextImportantMatch && <div style={{ background: "#020817", borderRadius: 8, padding: 10, marginBottom: 10 }}>
                   <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4, fontFamily: "monospace" }}>📅 PRÓXIMO PARTIDO IMPORTANTE</div>
                   <div style={{ fontSize: 12, color: "#94a3b8" }}>{team.nextImportantMatch}</div>
-                </div>
+                </div>}
 
-                <div style={{ background: color + "11", border: `1px solid ${color}22`, borderRadius: 8, padding: 10 }}>
+                {team.recentNews && <div style={{ background: color + "11", border: `1px solid ${color}22`, borderRadius: 8, padding: 10 }}>
                   <div style={{ fontSize: 11, color, marginBottom: 4, fontFamily: "monospace" }}>📰 NOTICIAS</div>
                   <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>{team.recentNews}</div>
-                </div>
+                </div>}
               </div>
             ))}
           </div>
@@ -355,16 +405,25 @@ export default function Home() {
               ))}
             </div>
             <StatRow icon="⚽" label="Goles/partido" home={data.homeTeam.goalsScored} away={data.awayTeam.goalsScored} />
-            <StatRow icon="🚩" label="Córners/partido" home={data.homeTeam.avgCorners} away={data.awayTeam.avgCorners} />
-            <StatRow icon="🟨" label="Tarjetas am./partido" home={data.homeTeam.avgYellowCards} away={data.awayTeam.avgYellowCards} />
-            <StatRow icon="📊" label="Posesión" home={`${data.homeTeam.possession}%`} away={`${data.awayTeam.possession}%`} />
+            <StatRow icon="🥅" label="Goles rec./partido" home={data.homeTeam.goalsConceded} away={data.awayTeam.goalsConceded} />
+            {data.homeTeam.avgCorners != null && <StatRow icon="🚩" label="Córners/partido" home={data.homeTeam.avgCorners} away={data.awayTeam.avgCorners} />}
+            {data.homeTeam.avgYellowCards != null && <StatRow icon="🟨" label="Tarjetas am./partido" home={data.homeTeam.avgYellowCards} away={data.awayTeam.avgYellowCards} />}
+            {data.homeTeam.possession != null && <StatRow icon="📊" label="Posesión" home={`${data.homeTeam.possession}%`} away={`${data.awayTeam.possession}%`} />}
+            {data.headToHead.lastResults?.length > 0 && (
+              <div style={{ marginTop: 14, fontSize: 12, color: "#94a3b8", lineHeight: 1.8 }}>
+                {data.headToHead.lastResults.map((r, i) => <div key={i}>• {r}</div>)}
+              </div>
+            )}
           </div>
 
           <div style={{ textAlign: "center", fontSize: 11, color: "#334155", fontFamily: "monospace", paddingTop: 8 }}>
-            Análisis generado con IA · Solo con fines informativos · No es asesoría de apuestas
+            {data.source === "stats"
+              ? "Calculado con resultados reales de football-data.org · Solo con fines informativos · No es asesoría de apuestas"
+              : "Análisis generado con IA · Solo con fines informativos · No es asesoría de apuestas"}
           </div>
         </div>
       )}
+      </>)}
     </div>
   );
 }

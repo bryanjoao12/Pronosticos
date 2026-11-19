@@ -1,3 +1,6 @@
+import { statsAnalysis } from "../../../lib/statsAnalysis";
+import { hasFootballData, LEAGUE_TO_FD } from "../../../lib/footballData";
+
 export const maxDuration = 60;
 
 const PROMPT_TEMPLATE = (home, away) => `
@@ -80,35 +83,58 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin text
 }`;
 
 export async function POST(request) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return Response.json({ error: "GEMINI_API_KEY not configured" }, { status: 500 });
-  }
-
-  const { home, away } = await request.json();
+  const { home, away, league } = await request.json();
   if (!home || !away) {
     return Response.json({ error: "Missing teams" }, { status: 400 });
   }
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: PROMPT_TEMPLATE(home, away) }] }],
-        tools: [{ googleSearch: {} }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 4000,
-        }
-      })
-    }
-  );
+  // 1) Resultados reales de football-data.org + modelo de probabilidad.
+  if (hasFootballData()) {
+    const stats = await statsAnalysis(home, away, LEAGUE_TO_FD[league]);
+    if (stats) return Response.json(stats);
+  }
+
+  // 2) Si la liga no está en football-data.org, se usa la IA con búsqueda en Google.
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return Response.json({ error: "No hay datos de estos equipos (falta FOOTBALL_DATA_API_KEY o GEMINI_API_KEY)." }, { status: 500 });
+  }
+
+  // Intentos en orden: con búsqueda web y, si falla por cuota (429) o
+  // saturación (503), sin búsqueda y con modelos alternativos.
+  const models = [...new Set([process.env.GEMINI_MODEL || "gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.5-flash"])];
+  const attempts = [
+    { model: models[0], search: true },
+    ...models.map(model => ({ model, search: false })),
+  ];
+
+  let res, lastErr = "", lastStatus = 500;
+  for (const { model, search } of attempts) {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: PROMPT_TEMPLATE(home, away) }] }],
+          ...(search ? { tools: [{ googleSearch: {} }] } : {}),
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 4000,
+          }
+        })
+      }
+    );
+    if (res.ok) break;
+    lastStatus = res.status;
+    lastErr = await res.text();
+    if (![429, 503, 404].includes(res.status)) break;
+  }
 
   if (!res.ok) {
-    const err = await res.text();
-    return Response.json({ error: err }, { status: res.status });
+    let msg = lastErr;
+    try { msg = JSON.parse(lastErr).error?.message || lastErr; } catch {}
+    return Response.json({ error: `Gemini (${lastStatus}): ${msg}` }, { status: lastStatus });
   }
 
   const data = await res.json();
